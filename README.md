@@ -6,7 +6,9 @@
 
 A SwiftBar plugin that shows your **real Claude Code plan usage** in the macOS menu bar — the same numbers as the `/usage` command inside Claude Code.
 
-![Screenshot](docs/screenshot.png)
+<p align="center">
+  <img src="docs/screenshot.png" width="380" alt="Claude Usage Tracker dropdown">
+</p>
 
 ## What it shows
 
