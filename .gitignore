@@ -1,2 +1,3 @@
 *.heic
 .DS_Store
+.claude-usage-state.json

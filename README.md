@@ -22,6 +22,7 @@ you@example.com
 ─────────────────────────
 Plan Limits
 Session (5h): █░░░░░░░░░ 6%    resets 4:00 PM
+✓ quota use matches local activity
 Week (all):   ██░░░░░░░░ 15%   resets Tue 8:30 AM
 Week (Opus):  █░░░░░░░░░ 5%
 ─────────────────────────
@@ -32,6 +33,16 @@ Month:        $97.80 ·  88.3M tok
 ─────────────────────────
 Refresh now
 ```
+
+### Other-device heuristic
+
+Since Anthropic doesn't expose a per-device or per-session usage breakdown for individual Max/Pro accounts (only Team/Enterprise admins get that), the tracker uses an honest proxy signal instead: on every refresh it compares how much your account's 5-hour quota moved against how many tokens *this machine* logged in that same window.
+
+- **Quota jumps while this machine stayed quiet** → `⚠ +N% quota, only +X tok here — check other devices` (orange) — a real signal something else consumed quota without local activity here
+- **Quota movement matches local activity** → `✓ quota use matches local activity` (gray) — normal, expected
+- **Right after install / a new 5h block starts** → `Building other-device baseline…` — needs one more refresh cycle to have something to compare against
+
+This is a heuristic, not proof — treat a warning as "go check `claude.ai/settings/claude-code` and your active sessions page," not a certainty.
 
 Progress bars turn **orange at 50%** and **red at 80%**. Refreshes every 2 minutes.
 

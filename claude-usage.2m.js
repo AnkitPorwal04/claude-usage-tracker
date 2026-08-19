@@ -1,14 +1,19 @@
 #!/opt/homebrew/bin/node
 // <xbar.title>Claude Code Usage Tracker</xbar.title>
-// <xbar.version>v2.0</xbar.version>
-// <xbar.desc>Shows real Claude plan limit usage (5h + weekly) plus local cost stats</xbar.desc>
+// <xbar.version>v3.0</xbar.version>
+// <xbar.desc>Shows real Claude plan limit usage (5h + weekly), other-device heuristic, and local cost stats</xbar.desc>
 // <xbar.dependencies>node, ccusage</xbar.dependencies>
 // <swiftbar.hideAbout>true</swiftbar.hideAbout>
 // <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 
 const { execFileSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 
 const CCUSAGE = "/opt/homebrew/bin/ccusage";
+const STATE_FILE = path.join(__dirname, ".claude-usage-state.json");
+const UTIL_JUMP_THRESHOLD = 5;
+const LOCAL_QUIET_TOKENS = 1000;
 
 function runCcusage(args) {
   try {
@@ -33,6 +38,20 @@ function getAccessToken() {
   } catch (e) {
     return null;
   }
+}
+
+function loadState() {
+  try {
+    return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveState(state) {
+  try {
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state));
+  } catch (e) {}
 }
 
 function getAccount() {
@@ -117,10 +136,13 @@ async function main() {
   const sinceArg = ymd(since).replace(/-/g, "");
 
   const token = getAccessToken();
-  const [plan, dailyData] = await Promise.all([
+  const [plan, dailyData, blocksData] = await Promise.all([
     token ? getPlanUsage(token) : Promise.resolve({ error: "no token" }),
     Promise.resolve(runCcusage(["daily", "--json", "--since", sinceArg])),
+    Promise.resolve(runCcusage(["blocks", "--active", "--json"])),
   ]);
+
+  const activeBlock = ((blocksData && blocksData.blocks) || []).find((b) => b.isActive && !b.isGap);
 
   const rows = ((dailyData && dailyData.daily) || []).filter((r) => !r.agent || r.agent === "all");
   const sum = (list, f) => list.reduce((a, r) => a + (r[f] || 0), 0);
@@ -139,9 +161,30 @@ async function main() {
 
     title = `✳ ${fhPct}% · wk ${sdPct}%`;
 
+    let anomalyLine = null;
+    if (activeBlock) {
+      const blockId = activeBlock.id || activeBlock.startTime;
+      const curLocalTokens = activeBlock.totalTokens || 0;
+      const prev = loadState();
+
+      if (prev && prev.blockId === blockId) {
+        const dUtil = fhPct - prev.util5h;
+        const dLocalTokens = curLocalTokens - prev.localTokens5h;
+        anomalyLine =
+          dUtil >= UTIL_JUMP_THRESHOLD && dLocalTokens <= LOCAL_QUIET_TOKENS
+            ? `⚠ +${dUtil}% quota, only +${tokens(Math.max(0, dLocalTokens))} tok here — check other devices | color=orange size=11`
+            : `✓ quota use matches local activity | color=gray size=11`;
+      } else {
+        anomalyLine = "Building other-device baseline… | color=gray size=11";
+      }
+
+      saveState({ blockId, util5h: fhPct, localTokens5h: curLocalTokens, ts: Date.now() });
+    }
+
     lines.push("Plan Limits | size=13");
     lines.push(`Session (5h): ${bar(fhPct)} ${fhPct}% | font=Menlo color=${pctColor(fhPct)}`);
     lines.push(`${resetLabel(fh.resets_at)} | color=gray size=11`);
+    if (anomalyLine) lines.push(anomalyLine);
     lines.push(`Week (all):   ${bar(sdPct)} ${sdPct}% | font=Menlo color=${pctColor(sdPct)}`);
     lines.push(`${resetLabel(sd.resets_at)} | color=gray size=11`);
 
