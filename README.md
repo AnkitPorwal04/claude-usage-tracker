@@ -89,7 +89,7 @@ On Intel Macs, edit the first line of the plugin and the `CCUSAGE` constant to m
 | Account name / email / plan | `~/.claude.json` |
 | Cost & token estimates | [ccusage](https://ccusage.com) reading local Claude Code logs in `~/.claude/projects` |
 
-Nothing is sent anywhere except the single authenticated request to Anthropic's own API. Cost figures are *estimates* at API pricing — on Max/Pro plans treat them as "value used", not a bill.
+By default, nothing is sent anywhere except the single authenticated request to Anthropic's own API. Cost figures are *estimates* at API pricing — on Max/Pro plans treat them as "value used", not a bill. (If you set up the optional [web dashboard](#web-dashboard) below, the plugin additionally pushes a usage snapshot to your own private deployment — see that section for exactly what's sent.)
 
 ## Customizing
 
@@ -104,6 +104,54 @@ Nothing is sent anywhere except the single authenticated request to Anthropic's 
 | No icon appears | Check SwiftBar is running and its plugin folder is `~/.swiftbar-plugins` (SwiftBar → Preferences → Plugin Folder). |
 | Keychain prompt loops | Open Keychain Access, find `Claude Code-credentials`, and grant SwiftBar/node access, or click *Always Allow* on the prompt. |
 | Costs show $0.00 | You haven't used Claude Code on this machine yet, or logs live elsewhere (`ccusage daily` should show data). |
+
+## Web Dashboard
+
+Want the same data as a real webpage (e.g. to check from your phone), instead of just the menu bar? The `dashboard/` folder is a self-contained Next.js app you deploy to your own **free** Vercel + Upstash account. It's password-protected — your usage data and account email are never public.
+
+### Why a separate deployment is needed
+
+A public webpage can't reach into your Mac's Keychain or read local files — those only exist on your machine. So the architecture is:
+
+1. **This Mac** computes the same snapshot as the menu bar (account info, 5h/weekly %, costs, 30-day history) every 2 minutes and **pushes** it to your deployment.
+2. **Your Vercel deployment** stores the latest snapshot in Upstash Redis and serves it only to whoever knows your dashboard password.
+3. **Multi-laptop ready**: each machine pushes under its own hostname, so if you later run the plugin on a second Mac, the dashboard automatically shows both as separate cards — no extra setup needed.
+
+### One-time setup (~10 minutes, $0)
+
+1. **Create a free Upstash Redis database** — sign up at [console.upstash.com](https://console.upstash.com) (no card required), create a Redis database on the Free plan, and copy its `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` from the REST API tab.
+   > Skip the Vercel Marketplace "Upstash" integration button for this — it routes through a paid-plan picker. Signing up directly at upstash.com and pasting the two values into Vercel's env vars (next step) is the free path and works identically.
+2. **Deploy to Vercel**:
+   ```bash
+   cd dashboard
+   npm install -g vercel   # if you don't have it
+   vercel login
+   vercel link             # creates/links a Vercel project for this folder
+   ```
+3. **Set environment variables** (replace the placeholder values — generate the two secrets with `openssl rand -hex 32`):
+   ```bash
+   vercel env add UPSTASH_REDIS_REST_URL production --value "<from Upstash>"
+   vercel env add UPSTASH_REDIS_REST_TOKEN production --value "<from Upstash>"
+   vercel env add DASHBOARD_PASSWORD production --value "<a password you'll type to view the site>"
+   vercel env add SESSION_SECRET production --value "$(openssl rand -hex 32)"
+   vercel env add INGEST_SECRET production --value "$(openssl rand -hex 32)"
+   ```
+   Repeat with `preview` and `development` in place of `production` if you want those environments to work too (add `--yes` to auto-accept the Preview "Git branch?" prompt).
+4. **Deploy**:
+   ```bash
+   vercel deploy --prod --yes
+   ```
+   Note the production URL it prints (e.g. `https://your-project.vercel.app`).
+5. **Point the local plugin at your deployment** — create `~/.swiftbar-plugins/.claude-usage-dashboard.json`:
+   ```json
+   { "url": "https://your-project.vercel.app", "secret": "<the INGEST_SECRET you set above>" }
+   ```
+   The plugin picks this up automatically on its next 2-minute refresh — no restart needed. Without this file, the plugin behaves exactly as before (menu bar only, nothing pushed anywhere).
+6. Visit your URL, log in with your `DASHBOARD_PASSWORD`, and you're done.
+
+### What data is sent to your deployment
+
+Exactly what's described in the [How it works](#how-it-works) table above, plus: machine hostname, and a 30-day daily cost/token history (for the chart). Nothing else — no prompts, no code, no conversation content. It's sent only to the Vercel project *you* deployed and control, authenticated with a secret only your machine knows.
 
 ## Credits
 

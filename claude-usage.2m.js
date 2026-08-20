@@ -9,9 +9,11 @@
 const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 
 const CCUSAGE = "/opt/homebrew/bin/ccusage";
 const STATE_FILE = path.join(__dirname, ".claude-usage-state.json");
+const DASHBOARD_CONFIG_FILE = path.join(__dirname, ".claude-usage-dashboard.json");
 const UTIL_JUMP_THRESHOLD = 5;
 const LOCAL_QUIET_TOKENS = 1000;
 
@@ -51,6 +53,28 @@ function loadState() {
 function saveState(state) {
   try {
     fs.writeFileSync(STATE_FILE, JSON.stringify(state));
+  } catch (e) {}
+}
+
+function loadDashboardConfig() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(DASHBOARD_CONFIG_FILE, "utf8"));
+    return cfg && cfg.url && cfg.secret ? cfg : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function pushSnapshot(snapshot) {
+  const cfg = loadDashboardConfig();
+  if (!cfg) return;
+  try {
+    await fetch(`${cfg.url.replace(/\/$/, "")}/api/ingest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-ingest-secret": cfg.secret },
+      body: JSON.stringify(snapshot),
+      signal: AbortSignal.timeout(8000),
+    });
   } catch (e) {}
 }
 
@@ -132,7 +156,7 @@ async function main() {
   const monthPrefix = todayStr.slice(0, 7);
   const weekAgo = new Date(now.getTime() - 6 * 86400000);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const since = weekAgo < monthStart ? weekAgo : monthStart;
+  const since = new Date(now.getTime() - 29 * 86400000);
   const sinceArg = ymd(since).replace(/-/g, "");
 
   const token = getAccessToken();
@@ -152,6 +176,7 @@ async function main() {
 
   const lines = [];
   let title;
+  let anomaly = { status: "unknown", message: "plan usage unavailable" };
 
   if (plan && !plan.error) {
     const fh = plan.five_hour || {};
@@ -161,7 +186,7 @@ async function main() {
 
     title = `✳ ${fhPct}% · wk ${sdPct}%`;
 
-    let anomalyLine = null;
+    anomaly = { status: "unknown", message: "no active session" };
     if (activeBlock) {
       const blockId = activeBlock.id || activeBlock.startTime;
       const curLocalTokens = activeBlock.totalTokens || 0;
@@ -170,16 +195,25 @@ async function main() {
       if (prev && prev.blockId === blockId) {
         const dUtil = fhPct - prev.util5h;
         const dLocalTokens = curLocalTokens - prev.localTokens5h;
-        anomalyLine =
+        anomaly =
           dUtil >= UTIL_JUMP_THRESHOLD && dLocalTokens <= LOCAL_QUIET_TOKENS
-            ? `⚠ +${dUtil}% quota, only +${tokens(Math.max(0, dLocalTokens))} tok here — check other devices | color=orange size=11`
-            : `✓ quota use matches local activity | color=gray size=11`;
+            ? { status: "flag", message: `+${dUtil}% quota, only +${tokens(Math.max(0, dLocalTokens))} tok here — check other devices` }
+            : { status: "clean", message: "quota use matches local activity" };
       } else {
-        anomalyLine = "Building other-device baseline… | color=gray size=11";
+        anomaly = { status: "baseline", message: "building other-device baseline" };
       }
 
       saveState({ blockId, util5h: fhPct, localTokens5h: curLocalTokens, ts: Date.now() });
     }
+
+    const anomalyLine =
+      anomaly.status === "flag"
+        ? `⚠ ${anomaly.message} | color=orange size=11`
+        : anomaly.status === "clean"
+          ? `✓ ${anomaly.message} | color=gray size=11`
+          : anomaly.status === "baseline"
+            ? `Building other-device baseline… | color=gray size=11`
+            : null;
 
     lines.push("Plan Limits | size=13");
     lines.push(`Session (5h): ${bar(fhPct)} ${fhPct}% | font=Menlo color=${pctColor(fhPct)}`);
@@ -224,6 +258,32 @@ async function main() {
 
   console.log("---");
   console.log("Refresh now | refresh=true");
+
+  const fh = (plan && !plan.error && plan.five_hour) || {};
+  const sd = (plan && !plan.error && plan.seven_day) || {};
+  const byModel = ((plan && !plan.error && plan.limits) || [])
+    .filter((l) => l.kind === "weekly_scoped" && l.scope && l.scope.model)
+    .map((l) => ({ name: l.scope.model.display_name || "model", pct: Math.round(l.percent || 0) }));
+
+  await pushSnapshot({
+    machine: os.hostname(),
+    account,
+    fiveHour: { pct: Math.round(fh.utilization || 0), resetsAt: fh.resets_at || null },
+    week: { pct: Math.round(sd.utilization || 0), resetsAt: sd.resets_at || null, byModel },
+    anomaly,
+    costs: {
+      today: sum(todayRows, "totalCost"),
+      todayTokens: sum(todayRows, "totalTokens"),
+      week: sum(weekRows, "totalCost"),
+      weekTokens: sum(weekRows, "totalTokens"),
+      month: sum(monthRows, "totalCost"),
+      monthTokens: sum(monthRows, "totalTokens"),
+    },
+    dailyHistory: rows
+      .slice()
+      .sort((a, b) => (a.period < b.period ? -1 : 1))
+      .map((r) => ({ date: r.period, cost: r.totalCost, tokens: r.totalTokens })),
+  });
 }
 
 main();
