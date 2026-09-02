@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Snapshot } from "@/lib/redis";
 import { parseStatusReport } from "@/lib/status";
-import { MachinePanel } from "./_components/MachinePanel";
+import { MachinePanel, machineSectionCount } from "./_components/MachinePanel";
 import { DashboardSkeleton, EmptyState, ErrorState } from "./_components/States";
 import { ServiceStatus, type ServiceStatusState } from "./_components/ServiceStatus";
 import { Mark } from "./_components/Mark";
@@ -15,6 +15,7 @@ type DashboardState =
 
 const REFRESH_INTERVAL_MS = 60_000;
 const CLOCK_INTERVAL_MS = 15_000;
+const DEFAULT_SERVICE_INDEX = 5;
 
 function redirectToLogin() {
   window.location.replace("/login");
@@ -22,6 +23,10 @@ function redirectToLogin() {
 
 function isSnapshotArray(value: unknown): value is Snapshot[] {
   return Array.isArray(value);
+}
+
+function sectionIndex(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
 export default function DashboardPage() {
@@ -127,6 +132,19 @@ export default function DashboardPage() {
     };
   }, [load, loadStatus]);
 
+  const panels = useMemo(() => {
+    if (state.status !== "ready") {
+      return { entries: [], serviceIndex: DEFAULT_SERVICE_INDEX };
+    }
+    let next = 1;
+    const entries = state.snapshots.map((snapshot) => {
+      const startIndex = next;
+      next += machineSectionCount(snapshot);
+      return { snapshot, startIndex };
+    });
+    return { entries, serviceIndex: next };
+  }, [state]);
+
   return (
     <>
       <Masthead
@@ -137,7 +155,7 @@ export default function DashboardPage() {
         busy={state.status === "loading"}
       />
 
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-7 sm:py-10">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-7 sm:py-10">
         {state.status === "loading" ? <DashboardSkeleton /> : null}
 
         {state.status === "error" ? (
@@ -149,29 +167,26 @@ export default function DashboardPage() {
             <EmptyState />
           ) : (
             <div className="flex flex-col gap-14">
-              {state.snapshots.map((snapshot) => (
-                <MachinePanel key={snapshot.machine} snapshot={snapshot} now={now} />
+              {panels.entries.map(({ snapshot, startIndex }) => (
+                <MachinePanel
+                  key={snapshot.machine}
+                  snapshot={snapshot}
+                  now={now}
+                  startIndex={startIndex}
+                />
               ))}
             </div>
           )
         ) : null}
 
         <div className="mt-14">
-          <ServiceStatus
-            state={serviceStatus}
-            index={
-              state.status === "ready" &&
-              state.snapshots.some((snapshot) => (snapshot.codex?.windows.length ?? 0) > 0)
-                ? "05"
-                : "04"
-            }
-          />
+          <ServiceStatus state={serviceStatus} index={sectionIndex(panels.serviceIndex)} />
         </div>
       </main>
 
-      <footer className="mx-auto w-full max-w-5xl px-4 pb-8 sm:px-7">
+      <footer className="mx-auto w-full max-w-6xl px-4 pb-8 sm:px-7">
         <div className="flex items-center justify-between gap-4 border-t border-rule pt-3">
-          <span className="plate-label">Claude Code · Usage Telemetry</span>
+          <span className="plate-label">Claude · Codex — Usage Telemetry</span>
           <span className="plate-label tnum">Auto-acquire 60s</span>
         </div>
       </footer>
@@ -191,15 +206,15 @@ function Masthead({ onRefresh, busy }: { onRefresh: () => void; busy: boolean })
 
   return (
     <header className="sticky top-0 z-20 border-b border-rule bg-ground">
-      <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-3 sm:px-7">
-        <div className="flex items-center gap-3">
-          <Mark className="size-5 text-ink" />
-          <span className="stencil text-[12px] text-ink">Claude Usage</span>
+      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-7">
+        <div className="flex min-w-0 items-center gap-3">
+          <Mark className="size-5 shrink-0 text-ink" />
+          <span className="stencil truncate text-[12px] text-ink">Usage Instrument</span>
           <span className="hidden h-3 w-px bg-rule-2 sm:block" />
-          <span className="plate-label hidden sm:block">Instrument Plate</span>
+          <span className="plate-label hidden sm:block">Claude · Codex</span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
             onClick={onRefresh}

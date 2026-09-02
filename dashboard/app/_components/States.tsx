@@ -30,29 +30,39 @@ export function DashboardSkeleton() {
 
       <ScanLine />
 
-      <div className="flex flex-col gap-3">
-        <SectionRule index="01" title="Acquiring signal" />
-        <div className="grid gap-3 lg:grid-cols-2">
-          {[0, 1].map((key) => (
-            <Plate key={key} bracket={false}>
-              <div className="border-b border-rule px-4 py-2.5">
-                <Bar className="h-2.5 w-24" />
-              </div>
-              <div className="flex flex-col items-center gap-5 p-5 sm:flex-row">
-                <Bar className="h-[132px] w-[164px] shrink-0 rounded-full" />
-                <div className="w-full flex-1">
-                  <Bar className="h-2.5 w-28" />
-                  <Bar className="mt-4 h-2 w-full" />
-                  <Bar className="mt-5 h-3 w-full" />
+      {[
+        { index: "01", title: "Claude", plates: 2 },
+        { index: "02", title: "Codex", plates: 1 },
+      ].map((section) => (
+        <div key={section.index} className="flex flex-col gap-3">
+          <SectionRule index={section.index} title={section.title} />
+          <Bar className="h-2.5 w-52" />
+          <div className="grid gap-3 lg:grid-cols-2">
+            {Array.from({ length: section.plates }, (_, key) => (
+              <Plate
+                key={key}
+                bracket={false}
+                className={section.plates === 1 ? "lg:col-span-2" : ""}
+              >
+                <div className="border-b border-rule px-4 py-2.5">
+                  <Bar className="h-2.5 w-24" />
                 </div>
-              </div>
-            </Plate>
-          ))}
+                <div className="flex flex-col items-center gap-5 p-5 sm:flex-row">
+                  <Bar className="h-[132px] w-[164px] shrink-0 rounded-full" />
+                  <div className="w-full flex-1">
+                    <Bar className="h-2.5 w-28" />
+                    <Bar className="mt-4 h-2 w-full" />
+                    <Bar className="mt-5 h-3 w-full" />
+                  </div>
+                </div>
+              </Plate>
+            ))}
+          </div>
         </div>
-      </div>
+      ))}
 
       <div className="flex flex-col gap-3">
-        <SectionRule index="02" title="Expenditure" />
+        <SectionRule index="03" title="Expenditure" />
         <div className="grid border border-rule sm:grid-cols-3">
           {[0, 1, 2].map((key) => (
             <div key={key} className="border-b border-rule px-4 py-4 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
@@ -65,7 +75,7 @@ export function DashboardSkeleton() {
       </div>
 
       <div className="flex flex-col gap-3">
-        <SectionRule index="03" title="Recorder" />
+        <SectionRule index="04" title="Recorder" />
         <Plate bracket={false}>
           <div className="p-4">
             <Bar className="h-[210px] w-full" />
@@ -85,8 +95,8 @@ export function EmptyState() {
         </svg>
         <h2 className="stencil mt-6 text-[13px] text-ink">No signal</h2>
         <p className="mt-2.5 max-w-sm text-[12px] leading-relaxed text-ink-2">
-          Waiting for the first snapshot from your Mac. The local tracker reports every 2
-          minutes and this plate will pick it up automatically.
+          Waiting for the first snapshot from your Mac. The local tracker reports Claude and
+          Codex usage every 2 minutes and this plate will pick it up automatically.
         </p>
         <p className="plate-label mt-6">Receiver armed</p>
       </div>

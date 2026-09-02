@@ -17,9 +17,14 @@ const plexCond = IBM_Plex_Sans_Condensed({
 });
 
 export const metadata: Metadata = {
-  title: "Claude Usage",
-  description: "Personal Claude Code subscription usage and cost dashboard",
+  title: "Usage Instrument",
+  description: "Claude and Codex subscription usage, limits and cost telemetry",
 };
+
+/* Duplicates globals.css tokens so a failed stylesheet degrades dark, not white. */
+const CRITICAL_SHELL_CSS = `:root{--ground:#0b0a09;--ink:#ece6da}
+html{color-scheme:dark;background-color:#0b0a09}
+body{background-color:#0b0a09;color:#ece6da;margin:0}`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
@@ -27,6 +32,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${plexMono.variable} ${plexCond.variable} h-full antialiased`}
     >
+      <head>
+        <style dangerouslySetInnerHTML={{ __html: CRITICAL_SHELL_CSS }} />
+      </head>
       <body className="min-h-full">
         <div className="flex min-h-dvh">
           <SpineRail />
@@ -47,7 +55,7 @@ function SpineRail() {
         <path d="M6 0V12M0 6H12" stroke="currentColor" strokeWidth="1" />
       </svg>
 
-      <span className="spine-text">Claude Code · Usage Telemetry</span>
+      <span className="spine-text">Multi-Provider Usage Telemetry</span>
 
       <div className="tick-rail h-24 w-2" />
     </aside>

@@ -51,7 +51,7 @@ export default function LoginPage() {
       <div className="plate-in w-full max-w-[22rem]">
         <div className="mb-5 flex items-center gap-3">
           <Mark className="size-5 text-ink" />
-          <span className="stencil text-[12px] text-ink">Claude Usage</span>
+          <span className="stencil text-[12px] text-ink">Usage Instrument</span>
         </div>
 
         <div className="bracket border border-rule bg-raise">

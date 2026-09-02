@@ -1,5 +1,6 @@
 @import "tailwindcss";
 
+/* Mirrored by the critical inline block in app/layout.tsx; keep both in sync. */
 :root {
   --ground: #0b0a09;
   --raise: #110f0d;
@@ -39,169 +40,223 @@
   --font-cond: var(--font-plex-cond), var(--font-plex-mono), sans-serif;
 }
 
-html {
-  color-scheme: dark;
-  background-color: var(--ground);
+@layer base {
+  html {
+    color-scheme: dark;
+    background-color: var(--ground);
+  }
+
+  body {
+    background-color: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: rgba(236, 230, 218, 0.2);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(236, 230, 218, 0.14);
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(236, 230, 218, 0.24);
+    background-clip: content-box;
+  }
 }
 
-body {
-  background-color: var(--ground);
-  color: var(--ink);
-  font-family: var(--font-plex-mono), ui-monospace, monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-}
+/* Must stay layered: unlayered, these silently outrank every Tailwind utility
+   composed onto the same element (hover:text-ink-2, text-[11px], ...). */
+@layer components {
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
 
-::selection {
-  background: rgba(236, 230, 218, 0.2);
-}
+  .plate-label {
+    font-family: var(--font-plex-cond), sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-weight: 600;
+    font-size: 10px;
+    line-height: 1;
+    color: var(--ink-3);
+  }
 
-.tnum {
-  font-variant-numeric: tabular-nums;
-}
+  .plate-label-ink {
+    color: var(--ink-2);
+  }
 
-.plate-label {
-  font-family: var(--font-plex-cond), sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  font-weight: 600;
-  font-size: 10px;
-  line-height: 1;
-  color: var(--ink-3);
-}
+  .stencil {
+    font-family: var(--font-plex-cond), sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+  }
 
-.plate-label-ink {
-  color: var(--ink-2);
-}
+  .spine-text {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-family: var(--font-plex-cond), sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.34em;
+    font-weight: 600;
+    font-size: 9px;
+    color: var(--ink-3);
+  }
 
-.stencil {
-  font-family: var(--font-plex-cond), sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 600;
-}
+  .tick-rail {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      var(--rule-2) 0px,
+      var(--rule-2) 1px,
+      transparent 1px,
+      transparent 9px
+    );
+  }
 
-.spine-text {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  font-family: var(--font-plex-cond), sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.34em;
-  font-weight: 500;
-  font-size: 9px;
-  color: var(--ink-3);
-}
+  .tick-rail-h {
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--rule-2) 0px,
+      var(--rule-2) 1px,
+      transparent 1px,
+      transparent 9px
+    );
+    background-repeat: repeat-x;
+    background-size: 9px 55%;
+    background-position: top left;
+  }
 
-.tick-rail {
-  background-image: repeating-linear-gradient(
-    to bottom,
-    var(--rule-2) 0px,
-    var(--rule-2) 1px,
-    transparent 1px,
-    transparent 9px
-  );
-}
+  .bracket {
+    position: relative;
+  }
 
-.tick-rail-h {
-  background-image: repeating-linear-gradient(
-    to right,
-    var(--rule-2) 0px,
-    var(--rule-2) 1px,
-    transparent 1px,
-    transparent 9px
-  );
-  background-repeat: repeat-x;
-  background-size: 9px 55%;
-  background-position: top left;
-}
+  .bracket::before,
+  .bracket::after {
+    content: "";
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    border-color: var(--rule-3);
+    border-style: solid;
+    pointer-events: none;
+  }
 
-.bracket {
-  position: relative;
-}
+  .bracket::before {
+    top: -1px;
+    left: -1px;
+    border-width: 1px 0 0 1px;
+  }
 
-.bracket::before,
-.bracket::after {
-  content: "";
-  position: absolute;
-  width: 9px;
-  height: 9px;
-  border-color: var(--rule-3);
-  border-style: solid;
-  pointer-events: none;
-}
+  .bracket::after {
+    bottom: -1px;
+    right: -1px;
+    border-width: 0 1px 1px 0;
+  }
 
-.bracket::before {
-  top: -1px;
-  left: -1px;
-  border-width: 1px 0 0 1px;
-}
+  .btn-plate {
+    background-color: transparent;
+    color: var(--ink-2);
+    border: 1px solid var(--rule-2);
+    transition:
+      border-color 0.14s ease,
+      color 0.14s ease,
+      background-color 0.14s ease;
+  }
 
-.bracket::after {
-  bottom: -1px;
-  right: -1px;
-  border-width: 0 1px 1px 0;
-}
+  .btn-plate:hover:not(:disabled) {
+    border-color: var(--rule-3);
+    color: var(--ink);
+    background-color: rgba(236, 230, 218, 0.04);
+  }
 
-.btn-plate {
-  background-color: transparent;
-  color: var(--ink-2);
-  border: 1px solid var(--rule-2);
-  transition:
-    border-color 0.14s ease,
-    color 0.14s ease,
-    background-color 0.14s ease;
-}
+  .btn-solid {
+    background-color: var(--ink);
+    color: var(--ground);
+    border: 1px solid var(--ink);
+    transition:
+      opacity 0.14s ease,
+      background-color 0.14s ease;
+  }
 
-.btn-plate:hover:not(:disabled) {
-  border-color: var(--rule-3);
-  color: var(--ink);
-  background-color: rgba(236, 230, 218, 0.04);
-}
+  .btn-solid:hover:not(:disabled) {
+    background-color: #fffaf0;
+  }
 
-.btn-solid {
-  background-color: var(--ink);
-  color: var(--ground);
-  border: 1px solid var(--ink);
-  transition:
-    opacity 0.14s ease,
-    background-color 0.14s ease;
-}
+  .btn-solid:disabled {
+    background-color: transparent;
+    color: var(--ink-3);
+    border-color: var(--rule-2);
+  }
 
-.btn-solid:hover:not(:disabled) {
-  background-color: #fffaf0;
-}
+  .focus-ring:focus-visible {
+    outline: 1px solid var(--ink-2);
+    outline-offset: 2px;
+  }
 
-.btn-solid:disabled {
-  background-color: transparent;
-  color: var(--ink-3);
-  border-color: var(--rule-2);
-}
+  .field {
+    background-color: var(--ground);
+    border: 1px solid var(--rule-2);
+    color: var(--ink);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    transition: border-color 0.14s ease;
+  }
 
-.focus-ring:focus-visible {
-  outline: 1px solid var(--ink-2);
-  outline-offset: 2px;
-}
+  .field::placeholder {
+    color: var(--ink-3);
+  }
 
-.field {
-  background-color: var(--ground);
-  border: 1px solid var(--rule-2);
-  color: var(--ink);
-  font-family: var(--font-plex-mono), ui-monospace, monospace;
-  transition: border-color 0.14s ease;
-}
+  .field:focus {
+    outline: none;
+    border-color: var(--rule-3);
+  }
 
-.field::placeholder {
-  color: var(--ink-3);
-}
+  .field-invalid {
+    border-color: var(--crit);
+  }
 
-.field:focus {
-  outline: none;
-  border-color: var(--rule-3);
-}
+  .plate-in {
+    animation: plate-in 0.3s ease-out both;
+  }
 
-.field-invalid {
-  border-color: var(--crit);
+  .needle {
+    transition: transform 1.05s cubic-bezier(0.2, 1.34, 0.36, 1);
+  }
+
+  .sweep {
+    animation: sweep 1.5s linear infinite;
+  }
+
+  .pulse-dim {
+    animation: pulse-dim 1.5s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .plate-in,
+    .sweep,
+    .pulse-dim {
+      animation: none;
+    }
+
+    .needle {
+      transition: none;
+    }
+  }
 }
 
 @keyframes plate-in {
@@ -232,52 +287,4 @@ body {
   50% {
     opacity: 0.38;
   }
-}
-
-.plate-in {
-  animation: plate-in 0.3s ease-out both;
-}
-
-.needle {
-  transition: transform 1.05s cubic-bezier(0.2, 1.34, 0.36, 1);
-}
-
-.sweep {
-  animation: sweep 1.5s linear infinite;
-}
-
-.pulse-dim {
-  animation: pulse-dim 1.5s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .plate-in,
-  .sweep,
-  .pulse-dim {
-    animation: none;
-  }
-
-  .needle {
-    transition: none;
-  }
-}
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(236, 230, 218, 0.14);
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(236, 230, 218, 0.24);
-  background-clip: content-box;
 }

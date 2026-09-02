@@ -6,6 +6,10 @@ import type { NextConfig } from "next";
 const noStore = [{ key: "Cache-Control", value: "no-store, must-revalidate" }];
 
 const nextConfig: NextConfig = {
+  // Styles ship inside the no-store HTML, so a shell can never pair with a
+  // stale or missing CSS chunk and render unstyled.
+  experimental: { inlineCss: true },
+
   async headers() {
     return [
       { source: "/", headers: noStore },
