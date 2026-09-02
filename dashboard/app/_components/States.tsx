@@ -1,73 +1,96 @@
-import { Card } from "./Card";
+import { Plate, SectionRule } from "./Plate";
+import { bands } from "@/app/_lib/usage";
 
-function Shimmer({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-md bg-white/6 ${className}`} />;
+function Bar({ className = "" }: { className?: string }) {
+  return <div className={`pulse-dim bg-[rgba(236,230,218,0.08)] ${className}`} />;
+}
+
+function ScanLine() {
+  return (
+    <div className="relative h-px w-full overflow-hidden bg-rule">
+      <div className="sweep h-px w-1/4 bg-[var(--ink-2)]" />
+    </div>
+  );
 }
 
 export function DashboardSkeleton() {
   return (
-    <section className="flex flex-col gap-4" aria-busy="true" aria-label="Loading usage data">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-col gap-2">
-          <Shimmer className="h-7 w-52" />
-          <Shimmer className="h-4 w-40" />
+    <section
+      className="flex flex-col gap-7"
+      aria-busy="true"
+      aria-label="Acquiring usage signal"
+    >
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-col gap-2.5">
+          <Bar className="h-5 w-48" />
+          <Bar className="h-3 w-36" />
         </div>
-        <Shimmer className="h-4 w-44" />
+        <Bar className="h-4 w-40" />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {[0, 1].map((key) => (
-          <Card key={key}>
-            <div className="flex items-start justify-between">
-              <div className="flex flex-col gap-2">
-                <Shimmer className="h-3 w-28" />
-                <Shimmer className="h-4 w-36" />
+      <ScanLine />
+
+      <div className="flex flex-col gap-3">
+        <SectionRule index="01" title="Acquiring signal" />
+        <div className="grid gap-3 lg:grid-cols-2">
+          {[0, 1].map((key) => (
+            <Plate key={key} bracket={false}>
+              <div className="border-b border-rule px-4 py-2.5">
+                <Bar className="h-2.5 w-24" />
               </div>
-              <Shimmer className="h-6 w-20 rounded-full" />
-            </div>
-            <div className="mt-5 flex items-center gap-6">
-              <Shimmer className="size-[148px] rounded-full" />
-              <div className="flex-1 flex-col gap-3">
-                <Shimmer className="h-4 w-32" />
-                <Shimmer className="mt-4 h-2.5 w-full rounded-full" />
+              <div className="flex flex-col items-center gap-5 p-5 sm:flex-row">
+                <Bar className="h-[132px] w-[164px] shrink-0 rounded-full" />
+                <div className="w-full flex-1">
+                  <Bar className="h-2.5 w-28" />
+                  <Bar className="mt-4 h-2 w-full" />
+                  <Bar className="mt-5 h-3 w-full" />
+                </div>
               </div>
+            </Plate>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <SectionRule index="02" title="Expenditure" />
+        <div className="grid border border-rule sm:grid-cols-3">
+          {[0, 1, 2].map((key) => (
+            <div key={key} className="border-b border-rule px-4 py-4 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
+              <Bar className="h-2.5 w-16" />
+              <Bar className="mt-3 h-6 w-24" />
+              <Bar className="mt-2.5 h-2.5 w-14" />
             </div>
-          </Card>
-        ))}
+          ))}
+        </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        {[0, 1, 2].map((key) => (
-          <Card key={key}>
-            <Shimmer className="h-3 w-20" />
-            <Shimmer className="mt-3 h-8 w-28" />
-            <Shimmer className="mt-2 h-4 w-20" />
-          </Card>
-        ))}
+      <div className="flex flex-col gap-3">
+        <SectionRule index="03" title="Recorder" />
+        <Plate bracket={false}>
+          <div className="p-4">
+            <Bar className="h-[210px] w-full" />
+          </div>
+        </Plate>
       </div>
-
-      <Card>
-        <Shimmer className="h-3 w-24" />
-        <Shimmer className="mt-5 h-[260px] w-full rounded-xl" />
-      </Card>
     </section>
   );
 }
 
 export function EmptyState() {
   return (
-    <Card className="flex flex-col items-center gap-4 py-16 text-center">
-      <div className="relative flex size-14 items-center justify-center rounded-2xl border border-line bg-panel-strong">
-        <span className="absolute size-2 rounded-full bg-ok/70 anim-breathe" />
-      </div>
-      <div className="max-w-md">
-        <h2 className="text-lg font-semibold tracking-tight">No data yet</h2>
-        <p className="mt-2 text-sm leading-relaxed text-muted">
-          Waiting for your Mac to push its first snapshot. The local tracker checks in
-          every 2 minutes — this page will pick it up automatically.
+    <Plate>
+      <div className="flex flex-col items-center px-6 py-16 text-center">
+        <svg viewBox="0 0 200 24" className="h-6 w-full max-w-xs text-ink-3" aria-hidden>
+          <line x1="0" y1="12" x2="200" y2="12" stroke="currentColor" strokeWidth="1" strokeDasharray="4 5" />
+        </svg>
+        <h2 className="stencil mt-6 text-[13px] text-ink">No signal</h2>
+        <p className="mt-2.5 max-w-sm text-[12px] leading-relaxed text-ink-2">
+          Waiting for the first snapshot from your Mac. The local tracker reports every 2
+          minutes and this plate will pick it up automatically.
         </p>
+        <p className="plate-label mt-6">Receiver armed</p>
       </div>
-    </Card>
+    </Plate>
   );
 }
 
@@ -79,27 +102,27 @@ export function ErrorState({
   onRetry: () => void;
 }) {
   return (
-    <Card className="flex flex-col items-center gap-4 py-16 text-center">
-      <div className="flex size-12 items-center justify-center rounded-2xl border border-crit/25 bg-crit/8">
-        <svg viewBox="0 0 20 20" fill="currentColor" className="size-5 text-crit" aria-hidden>
-          <path
-            fillRule="evenodd"
-            d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm.75-11.25a.75.75 0 0 0-1.5 0v4a.75.75 0 0 0 1.5 0v-4ZM10 13a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"
-            clipRule="evenodd"
-          />
-        </svg>
-      </div>
-      <div className="max-w-md">
-        <h2 className="text-lg font-semibold tracking-tight">Couldn&apos;t load usage</h2>
-        <p className="mt-2 text-sm leading-relaxed text-muted">{message}</p>
-      </div>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="rounded-lg border border-line-strong bg-panel-strong px-4 py-2 text-sm font-medium transition-colors hover:bg-white/8 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ok/60"
+    <Plate>
+      <div
+        className="flex flex-col items-center px-6 py-16 text-center"
+        style={{ borderTop: `2px solid ${bands.crit.color}` }}
       >
-        Try again
-      </button>
-    </Card>
+        <span
+          className="stencil px-2 py-1 text-[10px]"
+          style={{ backgroundColor: bands.crit.tint, color: bands.crit.color }}
+        >
+          Fault
+        </span>
+        <h2 className="stencil mt-5 text-[13px] text-ink">Telemetry unavailable</h2>
+        <p className="mt-2.5 max-w-sm text-[12px] leading-relaxed text-ink-2">{message}</p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="btn-solid focus-ring stencil mt-7 px-4 py-2 text-[11px]"
+        >
+          Retry acquisition
+        </button>
+      </div>
+    </Plate>
   );
 }

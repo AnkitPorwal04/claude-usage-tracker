@@ -1,7 +1,7 @@
 import type { Snapshot } from "@/lib/redis";
-import { Card, CardLabel } from "./Card";
-import { UsageRing } from "./UsageRing";
-import { UsageMeter } from "./UsageMeter";
+import { Plate, PlateHead, Readout, SectionRule } from "./Plate";
+import { Gauge } from "./Gauge";
+import { ScaleBar } from "./ScaleBar";
 import { AnomalyBanner } from "./AnomalyBanner";
 import { CostChart } from "./CostChart";
 import {
@@ -10,72 +10,85 @@ import {
   formatResetTime,
   formatTokens,
 } from "@/app/_lib/format";
-import { usageLabel, usageLevel, usagePalette } from "@/app/_lib/usage";
+import { bandFor } from "@/app/_lib/usage";
 
 export function MachinePanel({ snapshot, now }: { snapshot: Snapshot; now: number }) {
   const { account, fiveHour, week, anomaly, costs, dailyHistory, machine, ts } = snapshot;
 
   return (
-    <section className="flex flex-col gap-4">
-      <AccountHeader
-        account={account}
-        machine={machine}
-        ts={ts}
-        now={now}
-      />
+    <section className="flex flex-col gap-7">
+      <AccountHeader account={account} machine={machine} ts={ts} now={now} />
 
       <AnomalyBanner anomaly={anomaly} />
 
-      <div className="grid items-start gap-4 lg:grid-cols-2">
-        <SessionCard
-          title="5-hour session"
-          subtitle="Rolling session limit"
-          pct={fiveHour.pct}
-          resetsAt={fiveHour.resetsAt}
-          delay={40}
+      <div className="flex flex-col gap-3">
+        <SectionRule
+          index="01"
+          title="Consumption limits"
+          aside={<span className="plate-label">Bands I · II · III</span>}
         />
-        <SessionCard
-          title="Weekly limit"
-          subtitle="Rolling 7-day limit"
-          pct={week.pct}
-          resetsAt={week.resetsAt}
-          delay={80}
-          byModel={week.byModel}
-        />
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-3">
-        <CostCard
-          label="Today"
-          cost={costs.today}
-          tokens={costs.todayTokens}
-          delay={120}
-        />
-        <CostCard
-          label="Last 7 days"
-          cost={costs.week}
-          tokens={costs.weekTokens}
-          delay={160}
-        />
-        <CostCard
-          label="This month"
-          cost={costs.month}
-          tokens={costs.monthTokens}
-          delay={200}
-        />
-      </div>
-
-      <Card delay={240}>
-        <div className="mb-5 flex flex-wrap items-baseline justify-between gap-2">
-          <div>
-            <CardLabel>Daily spend</CardLabel>
-            <p className="mt-1 text-sm text-muted">
-              Local cost estimate, last {dailyHistory.length} days
-            </p>
-          </div>
+        <div className="grid items-start gap-3 lg:grid-cols-2">
+          <LimitPlate
+            title="5-hour session"
+            scope="Rolling 5h window"
+            pct={fiveHour.pct}
+            resetsAt={fiveHour.resetsAt}
+            delay={30}
+          />
+          <LimitPlate
+            title="Weekly allowance"
+            scope="Rolling 7d window"
+            pct={week.pct}
+            resetsAt={week.resetsAt}
+            byModel={week.byModel}
+            delay={70}
+          />
         </div>
-        <CostChart history={dailyHistory} />
-      </Card>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <SectionRule
+          index="02"
+          title="Expenditure"
+          aside={<span className="plate-label">USD · local estimate</span>}
+        />
+        <div className="plate-in grid border border-rule bg-raise sm:grid-cols-3">
+          <div className="border-b border-rule sm:border-b-0 sm:border-r">
+            <Readout
+              label="Today"
+              value={formatCurrency(costs.today)}
+              sub={formatTokens(costs.todayTokens)}
+            />
+          </div>
+          <div className="border-b border-rule sm:border-b-0 sm:border-r">
+            <Readout
+              label="Last 7 days"
+              value={formatCurrency(costs.week)}
+              sub={formatTokens(costs.weekTokens)}
+            />
+          </div>
+          <Readout
+            label="This month"
+            value={formatCurrency(costs.month)}
+            sub={formatTokens(costs.monthTokens)}
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <SectionRule
+          index="03"
+          title="Daily recorder"
+          aside={
+            <span className="tnum plate-label">{dailyHistory.length} samples</span>
+          }
+        />
+        <Plate delay={120}>
+          <div className="p-4">
+            <CostChart history={dailyHistory} />
+          </div>
+        </Plate>
+      </div>
     </section>
   );
 }
@@ -92,116 +105,113 @@ function AccountHeader({
   now: number;
 }) {
   return (
-    <div className="anim-rise flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+    <div className="plate-in flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
       <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h2 className="truncate text-xl font-semibold tracking-tight sm:text-2xl">
+        <p className="plate-label">Subject</p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h2 className="stencil truncate text-[20px] leading-none text-ink">
             {account.name ?? "Claude account"}
           </h2>
           {account.plan ? (
-            <span className="rounded-full border border-line-strong bg-panel-strong px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/80">
+            <span className="stencil border border-rule-2 px-1.5 py-0.5 text-[9px] text-ink-2">
               {account.plan}
             </span>
           ) : null}
         </div>
         {account.email ? (
-          <p className="mt-1 truncate text-sm text-muted">{account.email}</p>
+          <p className="mt-2 truncate text-[11px] text-ink-3">{account.email}</p>
         ) : null}
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-muted">
-        <span className="font-mono text-foreground/70">{machine}</span>
-        <span className="text-line-strong">·</span>
-        <span className="tnum">updated {formatRelativeTime(ts, now)}</span>
-      </div>
+      <dl className="flex shrink-0 gap-6">
+        <div>
+          <dt className="plate-label">Station</dt>
+          <dd className="mt-2 truncate text-[11px] text-ink-2">{machine}</dd>
+        </div>
+        <div>
+          <dt className="plate-label">Last sample</dt>
+          <dd className="tnum mt-2 text-[11px] text-ink-2">{formatRelativeTime(ts, now)}</dd>
+        </div>
+      </dl>
     </div>
   );
 }
 
-function SessionCard({
+function LimitPlate({
   title,
-  subtitle,
+  scope,
   pct,
   resetsAt,
   byModel,
   delay,
 }: {
   title: string;
-  subtitle: string;
+  scope: string;
   pct: number;
   resetsAt: string | null;
   byModel?: Snapshot["week"]["byModel"];
   delay?: number;
 }) {
-  const level = usageLevel(pct);
-  const palette = usagePalette[level];
+  const band = bandFor(pct);
   const resetLabel = formatResetTime(resetsAt);
 
   return (
-    <Card delay={delay} className="flex flex-col">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <CardLabel>{title}</CardLabel>
-          <p className="mt-1 text-sm text-muted">{subtitle}</p>
-        </div>
-        <span
-          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${palette.chipBg} ${palette.chipText} ${palette.chipRing}`}
-        >
-          {usageLabel(level)}
-        </span>
-      </div>
+    <Plate delay={delay} className="flex flex-col">
+      <PlateHead
+        title={title}
+        aside={
+          <span className="stencil text-[9px]" style={{ color: band.color }}>
+            {band.code}
+          </span>
+        }
+      />
 
-      <div className="mt-5 flex items-center gap-6">
-        <UsageRing pct={pct} />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm text-muted">
-            {resetLabel ? (
-              <>
-                Resets{" "}
-                <span className="font-medium text-foreground/85">{resetLabel}</span>
-              </>
-            ) : (
-              "Reset time unavailable"
-            )}
-          </p>
-          <div className="mt-4">
-            <UsageMeter label="Used" pct={pct} />
+      <div className="flex flex-1 flex-col items-center gap-5 p-4 sm:flex-row sm:items-start sm:gap-5">
+        <Gauge pct={pct} size={188} />
+
+        <dl className="w-full min-w-0 flex-1 sm:pt-3">
+          <Row term="Scope" value={scope} />
+          <Row term="Resets" value={resetLabel ?? "Unavailable"} />
+          <Row term="State" value={band.label} accent={band.color} />
+
+          <div className="pt-4">
+            <ScaleBar label="Of allowance" pct={pct} />
           </div>
-        </div>
+        </dl>
       </div>
 
       {byModel && byModel.length > 0 ? (
-        <div className="mt-6 border-t border-line pt-4">
-          <CardLabel>By model</CardLabel>
-          <div className="mt-3 flex flex-col gap-3">
+        <div className="border-t border-rule px-4 py-3.5">
+          <p className="plate-label">Per model</p>
+          <div className="mt-3 flex flex-col gap-2.5">
             {byModel.map((model) => (
-              <UsageMeter key={model.name} label={model.name} pct={model.pct} size="sm" />
+              <ScaleBar key={model.name} label={model.name} pct={model.pct} size="sm" />
             ))}
           </div>
         </div>
       ) : null}
-    </Card>
+    </Plate>
   );
 }
 
-function CostCard({
-  label,
-  cost,
-  tokens,
-  delay,
+function Row({
+  term,
+  value,
+  accent,
 }: {
-  label: string;
-  cost: number;
-  tokens: number;
-  delay?: number;
+  term: string;
+  value: string;
+  accent?: string;
 }) {
   return (
-    <Card delay={delay}>
-      <CardLabel>{label}</CardLabel>
-      <p className="tnum mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-        {formatCurrency(cost)}
-      </p>
-      <p className="tnum mt-1 text-sm text-muted">{formatTokens(tokens)}</p>
-    </Card>
+    <div className="flex items-baseline justify-between gap-3 border-b border-rule py-2 first:pt-0">
+      <dt className="plate-label">{term}</dt>
+      <dd
+        className="tnum truncate text-[12px]"
+        style={accent ? { color: accent } : { color: "var(--ink)" }}
+      >
+        {value}
+      </dd>
+    </div>
   );
 }

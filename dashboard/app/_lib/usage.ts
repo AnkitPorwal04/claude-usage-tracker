@@ -1,9 +1,12 @@
 export type UsageLevel = "ok" | "warn" | "crit";
 
+export const WARN_AT = 50;
+export const CRIT_AT = 80;
+
 export function usageLevel(pct: number): UsageLevel {
   if (!Number.isFinite(pct)) return "ok";
-  if (pct >= 80) return "crit";
-  if (pct >= 50) return "warn";
+  if (pct >= CRIT_AT) return "crit";
+  if (pct >= WARN_AT) return "warn";
   return "ok";
 }
 
@@ -12,52 +15,44 @@ export function clampPercent(pct: number): number {
   return Math.min(100, Math.max(0, pct));
 }
 
-type UsagePalette = {
-  stroke: string;
-  text: string;
-  bar: string;
-  track: string;
-  chipBg: string;
-  chipText: string;
-  chipRing: string;
-  glow: string;
+type Band = {
+  color: string;
+  tint: string;
+  label: string;
+  code: string;
+  from: number;
+  to: number;
 };
 
-export const usagePalette: Record<UsageLevel, UsagePalette> = {
+export const bands: Record<UsageLevel, Band> = {
   ok: {
-    stroke: "#3fcf8e",
-    text: "text-ok",
-    bar: "bg-ok",
-    track: "bg-ok/12",
-    chipBg: "bg-ok/10",
-    chipText: "text-ok",
-    chipRing: "ring-ok/25",
-    glow: "drop-shadow-[0_0_10px_rgba(63,207,142,0.35)]",
+    color: "#7dab5a",
+    tint: "rgba(125, 171, 90, 0.13)",
+    label: "Nominal",
+    code: "I",
+    from: 0,
+    to: WARN_AT,
   },
   warn: {
-    stroke: "#f5a524",
-    text: "text-warn",
-    bar: "bg-warn",
-    track: "bg-warn/12",
-    chipBg: "bg-warn/10",
-    chipText: "text-warn",
-    chipRing: "ring-warn/25",
-    glow: "drop-shadow-[0_0_10px_rgba(245,165,36,0.35)]",
+    color: "#e9a13b",
+    tint: "rgba(233, 161, 59, 0.13)",
+    label: "Elevated",
+    code: "II",
+    from: WARN_AT,
+    to: CRIT_AT,
   },
   crit: {
-    stroke: "#f76c6c",
-    text: "text-crit",
-    bar: "bg-crit",
-    track: "bg-crit/12",
-    chipBg: "bg-crit/10",
-    chipText: "text-crit",
-    chipRing: "ring-crit/25",
-    glow: "drop-shadow-[0_0_10px_rgba(247,108,108,0.4)]",
+    color: "#f2542d",
+    tint: "rgba(242, 84, 45, 0.13)",
+    label: "Critical",
+    code: "III",
+    from: CRIT_AT,
+    to: 100,
   },
 };
 
-export function usageLabel(level: UsageLevel): string {
-  if (level === "crit") return "Critical";
-  if (level === "warn") return "Elevated";
-  return "Healthy";
+export const bandOrder: UsageLevel[] = ["ok", "warn", "crit"];
+
+export function bandFor(pct: number): Band {
+  return bands[usageLevel(pct)];
 }

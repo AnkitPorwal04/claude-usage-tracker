@@ -9,7 +9,9 @@ export function proxy(req: NextRequest) {
   if (!valid) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
-    return NextResponse.redirect(url);
+    const res = NextResponse.redirect(url);
+    res.headers.set("Cache-Control", "no-store");
+    return res;
   }
 
   return NextResponse.next();
