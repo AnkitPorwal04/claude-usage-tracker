@@ -157,7 +157,15 @@ export default function DashboardPage() {
         ) : null}
 
         <div className="mt-14">
-          <ServiceStatus state={serviceStatus} />
+          <ServiceStatus
+            state={serviceStatus}
+            index={
+              state.status === "ready" &&
+              state.snapshots.some((snapshot) => (snapshot.codex?.windows.length ?? 0) > 0)
+                ? "05"
+                : "04"
+            }
+          />
         </div>
       </main>
 

@@ -1,4 +1,4 @@
-import type { Snapshot } from "@/lib/redis";
+import type { CodexLimitWindow, ModelBreakdown, Snapshot } from "@/lib/redis";
 import { Plate, PlateHead, Readout, SectionRule } from "./Plate";
 import { Gauge } from "./Gauge";
 import { ScaleBar } from "./ScaleBar";
@@ -13,7 +13,8 @@ import {
 import { bandFor } from "@/app/_lib/usage";
 
 export function MachinePanel({ snapshot, now }: { snapshot: Snapshot; now: number }) {
-  const { account, fiveHour, week, anomaly, costs, dailyHistory, machine, ts } = snapshot;
+  const { account, fiveHour, week, codex, anomaly, costs, dailyHistory, machine, ts } = snapshot;
+  const codexWindows = codex?.windows ?? [];
 
   return (
     <section className="flex flex-col gap-7">
@@ -24,7 +25,7 @@ export function MachinePanel({ snapshot, now }: { snapshot: Snapshot; now: numbe
       <div className="flex flex-col gap-3">
         <SectionRule
           index="01"
-          title="Consumption limits"
+          title="Claude consumption limits"
           aside={<span className="plate-label">Bands I · II · III</span>}
         />
         <div className="grid items-start gap-3 lg:grid-cols-2">
@@ -46,9 +47,36 @@ export function MachinePanel({ snapshot, now }: { snapshot: Snapshot; now: numbe
         </div>
       </div>
 
+      {codexWindows.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          <SectionRule
+            index="02"
+            title="Codex consumption limits"
+            aside={
+              <span className="plate-label">
+                {codex?.plan ? `ChatGPT ${codex.plan}` : "Bands I · II · III"}
+              </span>
+            }
+          />
+          <div className="grid items-start gap-3 lg:grid-cols-2">
+            {codexWindows.map((window, index) => (
+              <LimitPlate
+                key={window.seconds}
+                title={codexWindowTitle(window.seconds)}
+                scope={codexWindowScope(window.seconds)}
+                pct={window.pct}
+                resetsAt={window.resetsAt}
+                byModel={window.byLimit}
+                delay={30 + index * 40}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-3">
         <SectionRule
-          index="02"
+          index={codexWindows.length > 0 ? "03" : "02"}
           title="Expenditure"
           aside={<span className="plate-label">USD · local estimate</span>}
         />
@@ -77,7 +105,7 @@ export function MachinePanel({ snapshot, now }: { snapshot: Snapshot; now: numbe
 
       <div className="flex flex-col gap-3">
         <SectionRule
-          index="03"
+          index={codexWindows.length > 0 ? "04" : "03"}
           title="Daily recorder"
           aside={
             <span className="tnum plate-label">{dailyHistory.length} samples</span>
@@ -91,6 +119,19 @@ export function MachinePanel({ snapshot, now }: { snapshot: Snapshot; now: numbe
       </div>
     </section>
   );
+}
+
+function codexWindowTitle(seconds: CodexLimitWindow["seconds"]): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "Rate limit window";
+  if (seconds < 86_400) return `${Math.round(seconds / 3600)}-hour session`;
+  if (seconds === 604_800) return "Weekly allowance";
+  return `${Math.round(seconds / 86_400)}-day allowance`;
+}
+
+function codexWindowScope(seconds: CodexLimitWindow["seconds"]): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "Reported by Codex";
+  if (seconds < 86_400) return `Rolling ${Math.round(seconds / 3600)}h window`;
+  return `Rolling ${Math.round(seconds / 86_400)}d window`;
 }
 
 function AccountHeader({
@@ -149,7 +190,7 @@ function LimitPlate({
   scope: string;
   pct: number;
   resetsAt: string | null;
-  byModel?: Snapshot["week"]["byModel"];
+  byModel?: ModelBreakdown[];
   delay?: number;
 }) {
   const band = bandFor(pct);

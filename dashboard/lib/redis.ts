@@ -7,6 +7,19 @@ export type ModelBreakdown = {
   pct: number;
 };
 
+export type CodexLimitWindow = {
+  seconds: number;
+  pct: number;
+  resetsAt: string | null;
+  byLimit: ModelBreakdown[];
+};
+
+export type CodexUsage = {
+  plan: string | null;
+  email: string | null;
+  windows: CodexLimitWindow[];
+};
+
 export type DailyPoint = {
   date: string;
   cost: number;
@@ -30,6 +43,7 @@ export type Snapshot = {
     resetsAt: string | null;
     byModel: ModelBreakdown[];
   };
+  codex?: CodexUsage | null;
   anomaly: {
     status: "clean" | "flag" | "baseline" | "unknown";
     message: string;

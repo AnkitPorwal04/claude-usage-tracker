@@ -14,6 +14,8 @@ const os = require("os");
 const CCUSAGE = "/opt/homebrew/bin/ccusage";
 const STATE_FILE = path.join(__dirname, ".claude-usage-state.json");
 const DASHBOARD_CONFIG_FILE = path.join(__dirname, ".claude-usage-dashboard.json");
+const CODEX_AUTH_FILE = path.join(os.homedir(), ".codex", "auth.json");
+const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const UTIL_JUMP_THRESHOLD = 5;
 const LOCAL_QUIET_TOKENS = 1000;
 const STATUS_TIMEOUT_MS = 6000;
@@ -151,6 +153,107 @@ async function getPlanUsage(token) {
   }
 }
 
+function getCodexAuth() {
+  try {
+    const tokens = JSON.parse(fs.readFileSync(CODEX_AUTH_FILE, "utf8")).tokens;
+    if (!tokens || !tokens.access_token) return null;
+    return { token: tokens.access_token, accountId: tokens.account_id || "" };
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getCodexUsage(auth) {
+  try {
+    const res = await fetch(CODEX_USAGE_URL, {
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        "chatgpt-account-id": auth.accountId,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return { error: `HTTP ${res.status}` };
+    return await res.json();
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+function codexWindowName(seconds) {
+  if (!seconds || !isFinite(seconds) || seconds <= 0) return "Window";
+  if (seconds < 86400) return `Session (${Math.round(seconds / 3600)}h)`;
+  if (seconds === 604800) return "Week";
+  return `${Math.round(seconds / 86400)} days`;
+}
+
+function codexWindows(rateLimit) {
+  return [rateLimit && rateLimit.primary_window, rateLimit && rateLimit.secondary_window].filter(
+    (w) => w && typeof w.used_percent === "number" && w.limit_window_seconds > 0
+  );
+}
+
+function normalizeCodexUsage(raw) {
+  if (!raw || raw.error) return null;
+
+  const windows = codexWindows(raw.rate_limit).map((w) => ({
+    seconds: w.limit_window_seconds,
+    pct: Math.round(w.used_percent),
+    resetsAt: w.reset_at ? new Date(w.reset_at * 1000).toISOString() : null,
+    byLimit: [],
+  }));
+
+  for (const extra of raw.additional_rate_limits || []) {
+    const name = extra.limit_name || extra.metered_feature;
+    if (!name) continue;
+    for (const w of codexWindows(extra.rate_limit)) {
+      const target = windows.find((entry) => entry.seconds === w.limit_window_seconds);
+      if (target) target.byLimit.push({ name, pct: Math.round(w.used_percent) });
+    }
+  }
+
+  windows.sort((a, b) => a.seconds - b.seconds);
+
+  return {
+    plan: typeof raw.plan_type === "string" ? raw.plan_type : null,
+    email: typeof raw.email === "string" ? raw.email : null,
+    windows,
+  };
+}
+
+function codexLines(auth, usage, normalized) {
+  const lines = ["Codex Plan Limits | size=13"];
+
+  if (!auth) {
+    lines.push("Codex CLI is not signed in on this machine. | color=gray size=11");
+    return lines;
+  }
+
+  if (!normalized) {
+    lines.push(`Could not fetch Codex usage (${(usage && usage.error) || "unknown"}) | color=red size=11`);
+    lines.push("Run codex once to refresh login, then refresh. | color=gray size=11");
+    return lines;
+  }
+
+  if (normalized.windows.length === 0) {
+    lines.push("Codex reported no rate limit windows. | color=gray size=11");
+    return lines;
+  }
+
+  const width = Math.max(...normalized.windows.map((w) => codexWindowName(w.seconds).length));
+
+  for (const window of normalized.windows) {
+    const name = `${codexWindowName(window.seconds)}:`.padEnd(width + 1);
+    lines.push(`${name} ${bar(window.pct)} ${window.pct}% | font=Menlo color=${pctColor(window.pct)}`);
+    lines.push(`${resetLabel(window.resetsAt)} | color=gray size=11`);
+    for (const limit of window.byLimit) {
+      lines.push(`${limit.name}: ${bar(limit.pct)} ${limit.pct}% | font=Menlo color=${pctColor(limit.pct)}`);
+    }
+  }
+
+  return lines;
+}
+
 function normalizeStatus(value) {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(STATUS_RANK, value)
     ? value
@@ -266,12 +369,16 @@ async function main() {
   const sinceArg = ymd(since).replace(/-/g, "");
 
   const token = getAccessToken();
-  const [plan, dailyData, blocksData, services] = await Promise.all([
+  const codexAuth = getCodexAuth();
+  const [plan, codexUsage, dailyData, blocksData, services] = await Promise.all([
     token ? getPlanUsage(token) : Promise.resolve({ error: "no token" }),
+    codexAuth ? getCodexUsage(codexAuth) : Promise.resolve({ error: "not signed in" }),
     Promise.resolve(runCcusage(["daily", "--json", "--since", sinceArg])),
     Promise.resolve(runCcusage(["blocks", "--active", "--json"])),
     Promise.all(STATUS_SOURCES.map(getServiceStatus)),
   ]);
+
+  const codex = normalizeCodexUsage(codexUsage);
 
   const activeBlock = ((blocksData && blocksData.blocks) || []).find((b) => b.isActive && !b.isGap);
 
@@ -344,6 +451,9 @@ async function main() {
   }
 
   lines.push("---");
+  lines.push(...codexLines(codexAuth, codexUsage, codex));
+
+  lines.push("---");
   lines.push("Service Status | size=13");
   for (const service of services) lines.push(...serviceStatusLines(service));
 
@@ -388,6 +498,7 @@ async function main() {
     account,
     fiveHour: { pct: Math.round(fh.utilization || 0), resetsAt: fh.resets_at || null },
     week: { pct: Math.round(sd.utilization || 0), resetsAt: sd.resets_at || null, byModel },
+    codex,
     anomaly,
     costs: {
       today: sum(todayRows, "totalCost"),

@@ -19,7 +19,13 @@ export type ServiceStatusState =
   | { status: "error" }
   | { status: "ready"; report: StatusReport };
 
-export function ServiceStatus({ state }: { state: ServiceStatusState }) {
+export function ServiceStatus({
+  state,
+  index = "04",
+}: {
+  state: ServiceStatusState;
+  index?: string;
+}) {
   const services = state.status === "ready" ? state.report.services : [];
   const degraded = services.filter(
     (service) => !service.available || STATUS_RANK[service.status] > 0
@@ -28,7 +34,7 @@ export function ServiceStatus({ state }: { state: ServiceStatusState }) {
   return (
     <div className="flex flex-col gap-3">
       <SectionRule
-        index="04"
+        index={index}
         title="Upstream services"
         aside={
           <span className="plate-label">
