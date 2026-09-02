@@ -16,6 +16,46 @@ const STATE_FILE = path.join(__dirname, ".claude-usage-state.json");
 const DASHBOARD_CONFIG_FILE = path.join(__dirname, ".claude-usage-dashboard.json");
 const UTIL_JUMP_THRESHOLD = 5;
 const LOCAL_QUIET_TOKENS = 1000;
+const STATUS_TIMEOUT_MS = 6000;
+
+const STATUS_RANK = {
+  operational: 0,
+  under_maintenance: 1,
+  unknown: 1,
+  degraded_performance: 2,
+  partial_outage: 3,
+  major_outage: 4,
+};
+
+const STATUS_LABEL = {
+  operational: "Operational",
+  under_maintenance: "Under maintenance",
+  degraded_performance: "Degraded performance",
+  partial_outage: "Partial outage",
+  major_outage: "Major outage",
+  unknown: "Unknown",
+};
+
+const INDICATOR_STATUS = {
+  none: "operational",
+  maintenance: "under_maintenance",
+  minor: "degraded_performance",
+  major: "partial_outage",
+  critical: "major_outage",
+};
+
+const STATUS_SOURCES = [
+  {
+    label: "Claude",
+    url: "https://status.claude.com/api/v2/summary.json",
+    tracks: (name) => name === "Claude Code" || name.startsWith("Claude API"),
+  },
+  {
+    label: "Codex",
+    url: "https://status.openai.com/api/v2/summary.json",
+    tracks: (name) => name.includes("Codex"),
+  },
+];
 
 function runCcusage(args) {
   try {
@@ -111,6 +151,72 @@ async function getPlanUsage(token) {
   }
 }
 
+function normalizeStatus(value) {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(STATUS_RANK, value)
+    ? value
+    : "unknown";
+}
+
+function statusRank(status) {
+  const rank = STATUS_RANK[status];
+  return typeof rank === "number" ? rank : 1;
+}
+
+function statusColor(status) {
+  const rank = statusRank(status);
+  if (rank >= 4) return "red";
+  if (rank >= 2) return "orange";
+  if (rank >= 1) return "gray";
+  return "#34C759";
+}
+
+async function getServiceStatus(source) {
+  try {
+    const res = await fetch(source.url, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+    });
+    if (!res.ok) return { label: source.label, ok: false, reason: `status page returned ${res.status}` };
+
+    const body = await res.json();
+    const components = (body && Array.isArray(body.components) ? body.components : [])
+      .filter((c) => c && typeof c.name === "string" && source.tracks(c.name))
+      .map((c) => ({ name: c.name, status: normalizeStatus(c.status) }))
+      .sort((a, b) => statusRank(b.status) - statusRank(a.status));
+
+    const page = (body && body.status) || {};
+    const description = typeof page.description === "string" ? page.description : "";
+    const status = components.length
+      ? components.reduce((worst, c) => (statusRank(c.status) > statusRank(worst) ? c.status : worst), "operational")
+      : INDICATOR_STATUS[page.indicator] || "unknown";
+
+    return { label: source.label, ok: true, status, description, components };
+  } catch (e) {
+    return {
+      label: source.label,
+      ok: false,
+      reason: e && e.name === "TimeoutError" ? "status page timed out" : "status page unreachable",
+    };
+  }
+}
+
+function serviceStatusLines(service) {
+  if (!service.ok) {
+    return [`${service.label}: unavailable | color=gray`, `${service.reason} | color=gray size=11`];
+  }
+
+  const out = [`${service.label}: ${STATUS_LABEL[service.status]} | color=${statusColor(service.status)}`];
+  const flagged = service.components.filter((c) => statusRank(c.status) > 0);
+
+  if (flagged.length) {
+    for (const c of flagged) out.push(`${c.name} — ${STATUS_LABEL[c.status]} | color=gray size=11`);
+  } else if (service.description) {
+    out.push(`${service.description} | color=gray size=11`);
+  }
+
+  return out;
+}
+
 function money(n) {
   if (n == null || isNaN(n)) return "$0.00";
   return "$" + n.toFixed(2);
@@ -160,10 +266,11 @@ async function main() {
   const sinceArg = ymd(since).replace(/-/g, "");
 
   const token = getAccessToken();
-  const [plan, dailyData, blocksData] = await Promise.all([
+  const [plan, dailyData, blocksData, services] = await Promise.all([
     token ? getPlanUsage(token) : Promise.resolve({ error: "no token" }),
     Promise.resolve(runCcusage(["daily", "--json", "--since", sinceArg])),
     Promise.resolve(runCcusage(["blocks", "--active", "--json"])),
+    Promise.all(STATUS_SOURCES.map(getServiceStatus)),
   ]);
 
   const activeBlock = ((blocksData && blocksData.blocks) || []).find((b) => b.isActive && !b.isGap);
@@ -235,6 +342,17 @@ async function main() {
     lines.push(`Could not fetch plan usage (${(plan && plan.error) || "unknown"}) | color=red size=11`);
     lines.push("Open Claude Code once to refresh login, then refresh. | color=gray size=11");
   }
+
+  lines.push("---");
+  lines.push("Service Status | size=13");
+  for (const service of services) lines.push(...serviceStatusLines(service));
+
+  const worstServiceRank = services.reduce(
+    (worst, s) => Math.max(worst, s.ok ? statusRank(s.status) : 0),
+    0
+  );
+  if (worstServiceRank >= 3) title = `⛔ ${title}`;
+  else if (worstServiceRank >= 1) title = `⚠ ${title}`;
 
   console.log(title);
   console.log("---");

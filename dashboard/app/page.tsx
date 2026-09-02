@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Snapshot } from "@/lib/redis";
+import { parseStatusReport } from "@/lib/status";
 import { MachinePanel } from "./_components/MachinePanel";
 import { DashboardSkeleton, EmptyState, ErrorState } from "./_components/States";
+import { ServiceStatus, type ServiceStatusState } from "./_components/ServiceStatus";
 import { Mark } from "./_components/Mark";
 
 type DashboardState =
@@ -24,7 +26,24 @@ function isSnapshotArray(value: unknown): value is Snapshot[] {
 
 export default function DashboardPage() {
   const [state, setState] = useState<DashboardState>({ status: "loading" });
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatusState>({
+    status: "loading",
+  });
   const [now, setNow] = useState(() => Date.now());
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/status", { cache: "no-store" });
+      if (!res.ok) {
+        setServiceStatus({ status: "error" });
+        return;
+      }
+      const report = parseStatusReport(await res.json());
+      setServiceStatus(report ? { status: "ready", report } : { status: "error" });
+    } catch {
+      setServiceStatus({ status: "error" });
+    }
+  }, []);
 
   const load = useCallback(async (showSkeleton: boolean) => {
     if (showSkeleton) setState({ status: "loading" });
@@ -71,12 +90,16 @@ export default function DashboardPage() {
 
   useEffect(() => {
     void load(true);
-  }, [load]);
+    void loadStatus();
+  }, [load, loadStatus]);
 
   useEffect(() => {
-    const interval = setInterval(() => void load(false), REFRESH_INTERVAL_MS);
+    const interval = setInterval(() => {
+      void load(false);
+      void loadStatus();
+    }, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [load]);
+  }, [load, loadStatus]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), CLOCK_INTERVAL_MS);
@@ -85,10 +108,16 @@ export default function DashboardPage() {
 
   useEffect(() => {
     function onVisibilityChange() {
-      if (document.visibilityState === "visible") void load(false);
+      if (document.visibilityState === "visible") {
+        void load(false);
+        void loadStatus();
+      }
     }
     function onPageShow(event: PageTransitionEvent) {
-      if (event.persisted) void load(false);
+      if (event.persisted) {
+        void load(false);
+        void loadStatus();
+      }
     }
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("pageshow", onPageShow);
@@ -96,11 +125,17 @@ export default function DashboardPage() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pageshow", onPageShow);
     };
-  }, [load]);
+  }, [load, loadStatus]);
 
   return (
     <>
-      <Masthead onRefresh={() => void load(false)} busy={state.status === "loading"} />
+      <Masthead
+        onRefresh={() => {
+          void load(false);
+          void loadStatus();
+        }}
+        busy={state.status === "loading"}
+      />
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-7 sm:py-10">
         {state.status === "loading" ? <DashboardSkeleton /> : null}
@@ -120,6 +155,10 @@ export default function DashboardPage() {
             </div>
           )
         ) : null}
+
+        <div className="mt-14">
+          <ServiceStatus state={serviceStatus} />
+        </div>
       </main>
 
       <footer className="mx-auto w-full max-w-5xl px-4 pb-8 sm:px-7">
