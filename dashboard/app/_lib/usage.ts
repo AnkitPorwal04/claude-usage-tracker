@@ -51,8 +51,6 @@ export const bands: Record<UsageLevel, Band> = {
   },
 };
 
-export const bandOrder: UsageLevel[] = ["ok", "warn", "crit"];
-
 export function bandFor(pct: number): Band {
   return bands[usageLevel(pct)];
 }
