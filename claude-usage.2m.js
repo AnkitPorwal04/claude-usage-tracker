@@ -1,24 +1,34 @@
 #!/opt/homebrew/bin/node
 // <xbar.title>Claude Code Usage Tracker</xbar.title>
-// <xbar.version>v3.0</xbar.version>
+// <xbar.version>v3.1</xbar.version>
 // <xbar.desc>Shows real Claude plan limit usage (5h + weekly), other-device heuristic, and local cost stats</xbar.desc>
 // <xbar.dependencies>node, ccusage</xbar.dependencies>
 // <swiftbar.hideAbout>true</swiftbar.hideAbout>
 // <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 
-const { execFileSync } = require("child_process");
+const { execFile, execFileSync } = require("node:child_process");
+const { promisify } = require("node:util");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
+const execFileAsync = promisify(execFile);
+
 const CCUSAGE = "/opt/homebrew/bin/ccusage";
 const STATE_FILE = path.join(__dirname, ".claude-usage-state.json");
+const CACHE_FILE = path.join(__dirname, ".claude-usage-cache.json");
 const DASHBOARD_CONFIG_FILE = path.join(__dirname, ".claude-usage-dashboard.json");
 const CODEX_AUTH_FILE = path.join(os.homedir(), ".codex", "auth.json");
 const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const UTIL_JUMP_THRESHOLD = 5;
 const LOCAL_QUIET_TOKENS = 1000;
 const STATUS_TIMEOUT_MS = 6000;
+const USAGE_TIMEOUT_MS = 15000;
+const CCUSAGE_TIMEOUT_MS = 45000;
+const CCUSAGE_BUDGET_MS = 45000;
+const FETCH_BUDGET_MS = 30000;
+const CCUSAGE_MAX_BUFFER = 64 * 1024 * 1024;
+const RETRY_DELAYS_MS = [500, 1500];
 
 const STATUS_RANK = {
   operational: 0,
@@ -59,14 +69,54 @@ const STATUS_SOURCES = [
   },
 ];
 
-function runCcusage(args) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function settleWithin(promise, ms, fallback) {
+  let timer;
+  const guard = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+    if (typeof timer.unref === "function") timer.unref();
+  });
+  const settled = Promise.resolve(promise).then(
+    (value) => {
+      clearTimeout(timer);
+      return value;
+    },
+    () => {
+      clearTimeout(timer);
+      return fallback;
+    }
+  );
+  return Promise.race([settled, guard]);
+}
+
+async function withRetry(attempt, deadline) {
+  let last = await attempt();
+  for (let i = 0; i < RETRY_DELAYS_MS.length; i++) {
+    if (last.ok || !last.retry) return last;
+    if (Date.now() + RETRY_DELAYS_MS[i] >= deadline) return last;
+    await sleep(RETRY_DELAYS_MS[i]);
+    last = await attempt();
+  }
+  return last;
+}
+
+function classifyResponse(status) {
+  if (status === 401) return { retry: false, auth: true };
+  return { retry: status >= 500 || status === 408 || status === 429, auth: false };
+}
+
+async function runCcusage(args) {
   try {
-    const out = execFileSync(CCUSAGE, args, {
+    const { stdout } = await execFileAsync(CCUSAGE, args, {
       encoding: "utf8",
-      timeout: 60000,
+      timeout: CCUSAGE_TIMEOUT_MS,
+      maxBuffer: CCUSAGE_MAX_BUFFER,
       env: { ...process.env, PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" },
     });
-    return JSON.parse(out);
+    return JSON.parse(stdout);
   } catch (e) {
     return null;
   }
@@ -96,6 +146,43 @@ function saveState(state) {
   try {
     fs.writeFileSync(STATE_FILE, JSON.stringify(state));
   } catch (e) {}
+}
+
+function loadCache() {
+  try {
+    const cache = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
+    return cache && typeof cache === "object" ? cache : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveCache(cache) {
+  try {
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache));
+  } catch (e) {}
+}
+
+function resolveWithCache(result, entry) {
+  if (result.ok) return { data: result.data, stale: false, ageMs: 0, error: null, auth: false };
+  if (!result.auth && entry && entry.data) {
+    return {
+      data: entry.data,
+      stale: true,
+      ageMs: Math.max(0, Date.now() - (entry.ts || 0)),
+      error: result.error,
+      auth: false,
+    };
+  }
+  return { data: null, stale: false, ageMs: 0, error: result.error, auth: !!result.auth };
+}
+
+function staleNote(ageMs) {
+  const mins = Math.max(1, Math.round(ageMs / 60000));
+  if (mins < 60) return `stale · updated ${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `stale · updated ${hours}h ago`;
+  return `stale · updated ${Math.round(hours / 24)}d ago`;
 }
 
 function loadDashboardConfig() {
@@ -136,7 +223,7 @@ function getAccount() {
   }
 }
 
-async function getPlanUsage(token) {
+async function fetchPlanUsageOnce(token) {
   try {
     const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
       headers: {
@@ -144,13 +231,17 @@ async function getPlanUsage(token) {
         "anthropic-beta": "oauth-2025-04-20",
         "Content-Type": "application/json",
       },
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(USAGE_TIMEOUT_MS),
     });
-    if (!res.ok) return { error: `HTTP ${res.status}` };
-    return await res.json();
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, ...classifyResponse(res.status) };
+    return { ok: true, data: await res.json() };
   } catch (e) {
-    return { error: e.message };
+    return { ok: false, error: e.message, retry: true, auth: false };
   }
+}
+
+function getPlanUsage(token, deadline) {
+  return withRetry(() => fetchPlanUsageOnce(token), deadline);
 }
 
 function getCodexAuth() {
@@ -163,7 +254,7 @@ function getCodexAuth() {
   }
 }
 
-async function getCodexUsage(auth) {
+async function fetchCodexUsageOnce(auth) {
   try {
     const res = await fetch(CODEX_USAGE_URL, {
       headers: {
@@ -171,13 +262,17 @@ async function getCodexUsage(auth) {
         "chatgpt-account-id": auth.accountId,
         Accept: "application/json",
       },
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(USAGE_TIMEOUT_MS),
     });
-    if (!res.ok) return { error: `HTTP ${res.status}` };
-    return await res.json();
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, ...classifyResponse(res.status) };
+    return { ok: true, data: await res.json() };
   } catch (e) {
-    return { error: e.message };
+    return { ok: false, error: e.message, retry: true, auth: false };
   }
+}
+
+function getCodexUsage(auth, deadline) {
+  return withRetry(() => fetchCodexUsageOnce(auth), deadline);
 }
 
 function codexWindowName(seconds) {
@@ -221,7 +316,7 @@ function normalizeCodexUsage(raw) {
   };
 }
 
-function codexLines(auth, usage, normalized) {
+function codexLines(auth, resolved, normalized) {
   const lines = ["Codex Plan Limits | size=13"];
 
   if (!auth) {
@@ -230,10 +325,12 @@ function codexLines(auth, usage, normalized) {
   }
 
   if (!normalized) {
-    lines.push(`Could not fetch Codex usage (${(usage && usage.error) || "unknown"}) | color=red size=11`);
+    lines.push(`Could not fetch Codex usage (${resolved.error || "unknown"}) | color=red size=11`);
     lines.push("Run codex once to refresh login, then refresh. | color=gray size=11");
     return lines;
   }
+
+  if (resolved.stale) lines.push(`${staleNote(resolved.ageMs)} | color=gray size=11`);
 
   if (normalized.windows.length === 0) {
     lines.push("Codex reported no rate limit windows. | color=gray size=11");
@@ -244,10 +341,10 @@ function codexLines(auth, usage, normalized) {
 
   for (const window of normalized.windows) {
     const name = `${codexWindowName(window.seconds)}:`.padEnd(width + 1);
-    lines.push(`${name} ${bar(window.pct)} ${window.pct}% | font=Menlo color=${pctColor(window.pct)}`);
+    lines.push(`${name} ${bar(window.pct)} ${window.pct}% | font=Menlo color=${pctColor(window.pct, resolved.stale)}`);
     lines.push(`${resetLabel(window.resetsAt)} | color=gray size=11`);
     for (const limit of window.byLimit) {
-      lines.push(`${limit.name}: ${bar(limit.pct)} ${limit.pct}% | font=Menlo color=${pctColor(limit.pct)}`);
+      lines.push(`${limit.name}: ${bar(limit.pct)} ${limit.pct}% | font=Menlo color=${pctColor(limit.pct, resolved.stale)}`);
     }
   }
 
@@ -273,34 +370,47 @@ function statusColor(status) {
   return "#34C759";
 }
 
-async function getServiceStatus(source) {
+async function fetchServiceStatusOnce(source) {
   try {
     const res = await fetch(source.url, {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
     });
-    if (!res.ok) return { label: source.label, ok: false, reason: `status page returned ${res.status}` };
-
-    const body = await res.json();
-    const components = (body && Array.isArray(body.components) ? body.components : [])
-      .filter((c) => c && typeof c.name === "string" && source.tracks(c.name))
-      .map((c) => ({ name: c.name, status: normalizeStatus(c.status) }))
-      .sort((a, b) => statusRank(b.status) - statusRank(a.status));
-
-    const page = (body && body.status) || {};
-    const description = typeof page.description === "string" ? page.description : "";
-    const status = components.length
-      ? components.reduce((worst, c) => (statusRank(c.status) > statusRank(worst) ? c.status : worst), "operational")
-      : INDICATOR_STATUS[page.indicator] || "unknown";
-
-    return { label: source.label, ok: true, status, description, components };
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `status page returned ${res.status}`,
+        ...classifyResponse(res.status),
+      };
+    }
+    return { ok: true, data: await res.json() };
   } catch (e) {
     return {
-      label: source.label,
       ok: false,
-      reason: e && e.name === "TimeoutError" ? "status page timed out" : "status page unreachable",
+      error: e && e.name === "TimeoutError" ? "status page timed out" : "status page unreachable",
+      retry: true,
+      auth: false,
     };
   }
+}
+
+async function getServiceStatus(source, deadline) {
+  const result = await withRetry(() => fetchServiceStatusOnce(source), deadline);
+  if (!result.ok) return { label: source.label, ok: false, reason: result.error };
+
+  const body = result.data;
+  const components = (body && Array.isArray(body.components) ? body.components : [])
+    .filter((c) => c && typeof c.name === "string" && source.tracks(c.name))
+    .map((c) => ({ name: c.name, status: normalizeStatus(c.status) }))
+    .sort((a, b) => statusRank(b.status) - statusRank(a.status));
+
+  const page = (body && body.status) || {};
+  const description = typeof page.description === "string" ? page.description : "";
+  const status = components.length
+    ? components.reduce((worst, c) => (statusRank(c.status) > statusRank(worst) ? c.status : worst), "operational")
+    : INDICATOR_STATUS[page.indicator] || "unknown";
+
+  return { label: source.label, ok: true, status, description, components };
 }
 
 function serviceStatusLines(service) {
@@ -343,7 +453,8 @@ function bar(pct) {
   return "█".repeat(filled) + "░".repeat(10 - filled);
 }
 
-function pctColor(pct) {
+function pctColor(pct, stale) {
+  if (stale) return "gray";
   if (pct >= 80) return "red";
   if (pct >= 50) return "orange";
   return "#34C759";
@@ -367,18 +478,46 @@ async function main() {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const since = new Date(now.getTime() - 29 * 86400000);
   const sinceArg = ymd(since).replace(/-/g, "");
+  const deadline = Date.now() + FETCH_BUDGET_MS;
 
   const token = getAccessToken();
   const codexAuth = getCodexAuth();
-  const [plan, codexUsage, dailyData, blocksData, services] = await Promise.all([
-    token ? getPlanUsage(token) : Promise.resolve({ error: "no token" }),
-    codexAuth ? getCodexUsage(codexAuth) : Promise.resolve({ error: "not signed in" }),
-    Promise.resolve(runCcusage(["daily", "--json", "--since", sinceArg])),
-    Promise.resolve(runCcusage(["blocks", "--active", "--json"])),
-    Promise.all(STATUS_SOURCES.map(getServiceStatus)),
+  const cache = loadCache();
+
+  const [planResult, codexResult, dailyData, blocksData, services] = await Promise.all([
+    settleWithin(
+      token ? getPlanUsage(token, deadline) : Promise.resolve({ ok: false, error: "no token", auth: true }),
+      FETCH_BUDGET_MS,
+      { ok: false, error: "The operation was aborted due to timeout", auth: false }
+    ),
+    settleWithin(
+      codexAuth
+        ? getCodexUsage(codexAuth, deadline)
+        : Promise.resolve({ ok: false, error: "not signed in", auth: true }),
+      FETCH_BUDGET_MS,
+      { ok: false, error: "The operation was aborted due to timeout", auth: false }
+    ),
+    settleWithin(runCcusage(["daily", "--json", "--since", sinceArg]), CCUSAGE_BUDGET_MS, null),
+    settleWithin(runCcusage(["blocks", "--active", "--json"]), CCUSAGE_BUDGET_MS, null),
+    settleWithin(
+      Promise.all(STATUS_SOURCES.map((s) => getServiceStatus(s, deadline))),
+      FETCH_BUDGET_MS,
+      STATUS_SOURCES.map((s) => ({ label: s.label, ok: false, reason: "status page timed out" }))
+    ),
   ]);
 
-  const codex = normalizeCodexUsage(codexUsage);
+  const claude = resolveWithCache(planResult, cache.claude);
+  const codexResolved = resolveWithCache(codexResult, cache.codex);
+
+  if (planResult.ok || codexResult.ok) {
+    const next = { ...cache };
+    if (planResult.ok) next.claude = { data: planResult.data, ts: Date.now() };
+    if (codexResult.ok) next.codex = { data: codexResult.data, ts: Date.now() };
+    saveCache(next);
+  }
+
+  const plan = claude.data;
+  const codex = normalizeCodexUsage(codexResolved.data);
 
   const activeBlock = ((blocksData && blocksData.blocks) || []).find((b) => b.isActive && !b.isGap);
 
@@ -392,32 +531,34 @@ async function main() {
   let title;
   let anomaly = { status: "unknown", message: "plan usage unavailable" };
 
-  if (plan && !plan.error) {
+  if (plan) {
     const fh = plan.five_hour || {};
     const sd = plan.seven_day || {};
     const fhPct = Math.round(fh.utilization || 0);
     const sdPct = Math.round(sd.utilization || 0);
 
-    title = `✳ ${fhPct}% · wk ${sdPct}%`;
+    title = claude.stale ? `✳ ${fhPct}% · wk ${sdPct}% ⏳` : `✳ ${fhPct}% · wk ${sdPct}%`;
 
-    anomaly = { status: "unknown", message: "no active session" };
-    if (activeBlock) {
-      const blockId = activeBlock.id || activeBlock.startTime;
-      const curLocalTokens = activeBlock.totalTokens || 0;
-      const prev = loadState();
+    if (!claude.stale) {
+      anomaly = { status: "unknown", message: "no active session" };
+      if (activeBlock) {
+        const blockId = activeBlock.id || activeBlock.startTime;
+        const curLocalTokens = activeBlock.totalTokens || 0;
+        const prev = loadState();
 
-      if (prev && prev.blockId === blockId) {
-        const dUtil = fhPct - prev.util5h;
-        const dLocalTokens = curLocalTokens - prev.localTokens5h;
-        anomaly =
-          dUtil >= UTIL_JUMP_THRESHOLD && dLocalTokens <= LOCAL_QUIET_TOKENS
-            ? { status: "flag", message: `+${dUtil}% quota, only +${tokens(Math.max(0, dLocalTokens))} tok here — check other devices` }
-            : { status: "clean", message: "quota use matches local activity" };
-      } else {
-        anomaly = { status: "baseline", message: "building other-device baseline" };
+        if (prev && prev.blockId === blockId) {
+          const dUtil = fhPct - prev.util5h;
+          const dLocalTokens = curLocalTokens - prev.localTokens5h;
+          anomaly =
+            dUtil >= UTIL_JUMP_THRESHOLD && dLocalTokens <= LOCAL_QUIET_TOKENS
+              ? { status: "flag", message: `+${dUtil}% quota, only +${tokens(Math.max(0, dLocalTokens))} tok here — check other devices` }
+              : { status: "clean", message: "quota use matches local activity" };
+        } else {
+          anomaly = { status: "baseline", message: "building other-device baseline" };
+        }
+
+        saveState({ blockId, util5h: fhPct, localTokens5h: curLocalTokens, ts: Date.now() });
       }
-
-      saveState({ blockId, util5h: fhPct, localTokens5h: curLocalTokens, ts: Date.now() });
     }
 
     const anomalyLine =
@@ -430,28 +571,29 @@ async function main() {
             : null;
 
     lines.push("Plan Limits | size=13");
-    lines.push(`Session (5h): ${bar(fhPct)} ${fhPct}% | font=Menlo color=${pctColor(fhPct)}`);
+    if (claude.stale) lines.push(`${staleNote(claude.ageMs)} | color=gray size=11`);
+    lines.push(`Session (5h): ${bar(fhPct)} ${fhPct}% | font=Menlo color=${pctColor(fhPct, claude.stale)}`);
     lines.push(`${resetLabel(fh.resets_at)} | color=gray size=11`);
     if (anomalyLine) lines.push(anomalyLine);
-    lines.push(`Week (all):   ${bar(sdPct)} ${sdPct}% | font=Menlo color=${pctColor(sdPct)}`);
+    lines.push(`Week (all):   ${bar(sdPct)} ${sdPct}% | font=Menlo color=${pctColor(sdPct, claude.stale)}`);
     lines.push(`${resetLabel(sd.resets_at)} | color=gray size=11`);
 
     for (const l of plan.limits || []) {
       if (l.kind === "weekly_scoped" && l.scope && l.scope.model) {
         const name = l.scope.model.display_name || "model";
         const p = Math.round(l.percent || 0);
-        lines.push(`Week (${name}): ${bar(p)} ${p}% | font=Menlo color=${pctColor(p)}`);
+        lines.push(`Week (${name}): ${bar(p)} ${p}% | font=Menlo color=${pctColor(p, claude.stale)}`);
       }
     }
   } else {
     title = "✳ ⚠︎";
     lines.push("Plan Limits | size=13");
-    lines.push(`Could not fetch plan usage (${(plan && plan.error) || "unknown"}) | color=red size=11`);
+    lines.push(`Could not fetch plan usage (${claude.error || "unknown"}) | color=red size=11`);
     lines.push("Open Claude Code once to refresh login, then refresh. | color=gray size=11");
   }
 
   lines.push("---");
-  lines.push(...codexLines(codexAuth, codexUsage, codex));
+  lines.push(...codexLines(codexAuth, codexResolved, codex));
 
   lines.push("---");
   lines.push("Service Status | size=13");
@@ -487,9 +629,9 @@ async function main() {
   console.log("---");
   console.log("Refresh now | refresh=true");
 
-  const fh = (plan && !plan.error && plan.five_hour) || {};
-  const sd = (plan && !plan.error && plan.seven_day) || {};
-  const byModel = ((plan && !plan.error && plan.limits) || [])
+  const fh = (plan && plan.five_hour) || {};
+  const sd = (plan && plan.seven_day) || {};
+  const byModel = ((plan && plan.limits) || [])
     .filter((l) => l.kind === "weekly_scoped" && l.scope && l.scope.model)
     .map((l) => ({ name: l.scope.model.display_name || "model", pct: Math.round(l.percent || 0) }));
 
@@ -500,6 +642,7 @@ async function main() {
     week: { pct: Math.round(sd.utilization || 0), resetsAt: sd.resets_at || null, byModel },
     codex,
     anomaly,
+    stale: claude.stale || codexResolved.stale,
     costs: {
       today: sum(todayRows, "totalCost"),
       todayTokens: sum(todayRows, "totalTokens"),

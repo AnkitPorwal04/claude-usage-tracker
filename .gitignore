@@ -1,3 +1,5 @@
 *.heic
 .DS_Store
 .claude-usage-state.json
+.claude-usage-cache.json
+.claude-usage-dashboard.json
